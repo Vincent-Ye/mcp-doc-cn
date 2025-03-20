@@ -1,0 +1,388 @@
+---
+标题: MCP服务器  
+描述: 了解如何实现和配置模型上下文协议 (MCP) 服务器  
+
+---
+
+## 概述  
+
+MCP服务器是模型上下文协议 (MCP) 架构中的核心组件，为客户端提供工具、资源和功能。它实现了协议的服务器端，负责以下任务：  
+
+- 提供客户端可发现和执行的工具  
+- 使用基于URI的访问模式管理资源  
+- 提供提示模板并处理提示请求  
+- 支持与客户端的功能协商  
+- 实现服务器端协议操作  
+- 管理并发客户端连接  
+- 提供结构化日志记录和通知  
+
+该服务器支持同步和异步API，允许在不同的应用场景中实现灵活的集成。  
+
+<Tabs>  
+  <Tab title="同步API">  
+```java  
+// 使用自定义配置创建服务器
+McpSyncServer syncServer = McpServer.sync(transport)
+    .serverInfo("my-server", "1.0.0")
+    .capabilities(ServerCapabilities.builder()
+        .resources(true)     // 启用资源支持
+        .tools(true)         // 启用工具支持
+        .prompts(true)       // 启用提示支持
+        .logging()           // 启用日志记录支持
+        .build())
+    .build();
+
+// 注册工具、资源和提示
+syncServer.addTool(syncToolRegistration);
+syncServer.addResource(syncResourceRegistration);
+syncServer.addPrompt(syncPromptRegistration);
+
+// 发送日志记录通知
+syncServer.loggingNotification(LoggingMessageNotification.builder()
+    .level(LoggingLevel.INFO)
+    .logger("custom-logger")
+    .data("服务器已初始化")
+    .build());
+
+// 完成后关闭服务器
+syncServer.close();
+```  
+  </Tab>  
+
+  <Tab title="异步API">  
+```java  
+// 使用自定义配置创建异步服务器
+McpAsyncServer asyncServer = McpServer.async(transport)
+    .serverInfo("my-server", "1.0.0")
+    .capabilities(ServerCapabilities.builder()
+        .resources(true)     // 启用资源支持
+        .tools(true)         // 启用工具支持
+        .prompts(true)       // 启用提示支持
+        .logging()           // 启用日志记录支持
+        .build())
+    .build();
+
+// 注册工具、资源和提示
+asyncServer.addTool(asyncToolRegistration)
+    .doOnSuccess(v -> logger.info("工具已注册"))
+    .subscribe();
+
+asyncServer.addResource(asyncResourceRegistration)
+    .doOnSuccess(v -> logger.info("资源已注册"))
+    .subscribe();
+
+asyncServer.addPrompt(asyncPromptRegistration)
+    .doOnSuccess(v -> logger.info("提示已注册"))
+    .subscribe();
+
+// 发送日志记录通知
+asyncServer.loggingNotification(LoggingMessageNotification.builder()
+    .level(LoggingLevel.INFO)
+    .logger("custom-logger")
+    .data("服务器已初始化")
+    .build());
+
+// 完成后关闭服务器
+asyncServer.close()
+    .doOnSuccess(v -> logger.info("服务器已关闭"))
+    .subscribe();
+```  
+  </Tab>  
+</Tabs>  
+
+## 服务器传输层  
+
+MCP SDK中的传输层负责处理客户端和服务器之间的通信。它提供了支持不同通信协议和模式的各种实现。SDK包含若干内置的传输层实现：  
+
+<Tabs>  
+
+  <Tab title="STDIO">  
+    <>
+      使用基于进程的传输创建：  
+
+      ```java  
+      StdioServerTransport transport = new StdioServerTransport(new ObjectMapper());
+      ```  
+
+      提供标准输入/输出流上的双向JSON-RPC消息处理，包括非阻塞消息处理、序列化/反序列化，以及优雅的关闭支持。  
+
+      关键特性:  
+      <ul>  
+        <li>通过标准输入/输出实现双向通信</li>  
+        <li>支持基于进程的集成</li>  
+        <li>简单的设置和配置</li>  
+        <li>轻量级实现</li>  
+      </ul>  
+    </>
+  </Tab>  
+</Tabs>  
+
+<Tab title="SSE（WebFlux）">
+  <>
+    <p>创建基于 WebFlux 的 SSE 服务端传输层。<br />需要依赖<code>mcp-spring-webflux</code>。</p>
+
+    ```java
+    @Configuration
+    class McpConfig {
+        @Bean
+        WebFluxSseServerTransport webFluxSseServerTransport(ObjectMapper mapper) {
+            return new WebFluxSseServerTransport(mapper, "/mcp/message");
+        }
+
+        @Bean
+        RouterFunction<?> mcpRouterFunction(WebFluxSseServerTransport transport) {
+            return transport.getRouterFunction();
+        }
+    }
+    ```
+
+    <p>基于 MCP HTTP 的 SSE 传输规范实现，提供如下功能：</p>
+    <ul>
+      <li>基于 WebFlux 的响应式 HTTP 流传输</li>
+      <li>通过 SSE 端点支持并发客户端连接</li>
+      <li>消息路由与会话管理</li>
+      <li>优雅的关闭能力</li>
+    </ul>
+  </>
+</Tab>
+
+
+<Tab title="SSE（WebMvc）">
+  <>
+    <p>创建基于 WebMvc 的 SSE 服务端传输层。<br />需要依赖<code>mcp-spring-webmvc</code>。</p>
+
+    ```java
+    @Configuration
+    @EnableWebMvc
+    class McpConfig {
+        @Bean
+        WebMvcSseServerTransport webMvcSseServerTransport(ObjectMapper mapper) {
+            return new WebMvcSseServerTransport(mapper, "/mcp/message");
+        }
+
+        @Bean
+        RouterFunction<ServerResponse> mcpRouterFunction(WebMvcSseServerTransport transport) {
+            return transport.getRouterFunction();
+        }
+    }
+    ```
+
+    <p>基于 MCP HTTP 的 SSE 传输规范实现，提供如下功能：</p>
+    <ul>
+      <li>服务端事件流传输</li>
+      <li>与 Spring WebMVC 集成</li>
+      <li>支持传统的 Web 应用</li>
+      <li>同步操作处理</li>
+    </ul>
+  </>
+</Tab>
+
+
+<Tab title="SSE（Servlet）">
+  <>
+    <p>
+      创建基于 Servlet 的 SSE 服务端传输层。此功能包含在核心<code>mcp</code>模块中。<br />
+      <code>HttpServletSseServerTransport</code>可用于任何 Servlet 容器。<br />
+      若用于 Spring Web 应用，可以注册为一个 Servlet bean：
+    </p>
+
+    ```java
+    @Configuration
+    @EnableWebMvc
+    public class McpServerConfig implements WebMvcConfigurer {
+
+        @Bean
+        public HttpServletSseServerTransport servletSseServerTransport() {
+            return new HttpServletSseServerTransport(new ObjectMapper(), "/mcp/message");
+        }
+
+        @Bean
+        public ServletRegistrationBean customServletBean(HttpServletSseServerTransport servlet) {
+            return new ServletRegistrationBean(servlet);
+        }
+    }
+    ```
+
+    <p>
+      使用传统的 Servlet API 实现 MCP HTTP 的 SSE 传输规范，提供如下功能：
+    </p>
+    <ul>
+      <li>基于 Servlet 6.0 异步支持的消息处理</li>
+      <li>多客户端连接的会话管理</li>
+      <li>
+        两种类型的端点：
+        <ul>
+          <li>SSE 端点 (<code>/sse</code>) 用于服务端向客户端事件传输</li>
+          <li>消息端点（可配置）用于客户端向服务端请求处理</li>
+        </ul>
+      </li>
+      <li>错误处理与响应格式化功能</li>
+      <li>优雅关闭支持</li>
+    </ul>
+  </>
+</Tab>
+
+</Tabs>
+
+
+## 服务端能力
+
+服务端可以配置多种功能：
+
+```java
+var capabilities = ServerCapabilities.builder()
+    .resources(false, true)  // 资源支持，附带修改列表通知
+    .tools(true)            // 工具支持，附带修改列表通知
+    .prompts(true)          // 提示支持，附带修改列表通知
+    .logging()              // 启用日志支持（默认启用，日志级别为 INFO）
+    .build();
+```
+
+### 日志支持
+
+服务端提供结构化日志功能，可发送不同严重级别的日志消息给客户端：
+
+```java
+// 发送日志消息给客户端
+server.loggingNotification(LoggingMessageNotification.builder()
+    .level(LoggingLevel.INFO) // 日志级别：信息
+    .logger("custom-logger") // 日志记录器名称
+    .data("Custom log message") // 自定义日志消息内容
+    .build());
+```
+
+客户端可以通过 `mcpClient.setLoggingLevel(level)` 请求控制接收日志的最低级别。低于设置级别的消息将被过滤掉。  
+支持的日志级别（按严重性递增排序）：  
+DEBUG (0), INFO (1), NOTICE (2), WARNING (3), ERROR (4), CRITICAL (5), ALERT (6), EMERGENCY (7)
+
+### 工具注册
+
+<Tabs>
+  <Tab title="同步">
+```java
+// 同步工具注册
+var schema = """
+            {
+              "type" : "object",
+              "id" : "urn:jsonschema:Operation",
+              "properties" : {
+                "operation" : {
+                  "type" : "string"
+                },
+                "a" : {
+                  "type" : "number"
+                },
+                "b" : {
+                  "type" : "number"
+                }
+              }
+            }
+            """;
+var syncToolRegistration = new McpServerFeatures.SyncToolRegistration(
+    new Tool("calculator", "基础计算器", schema),
+    arguments -> {
+        // 工具实现
+        return new CallToolResult(result, false);
+    }
+);
+```
+  </Tab>
+
+  <Tab title="异步">
+```java
+// 异步工具注册
+var schema = """
+            {
+              "type" : "object",
+              "id" : "urn:jsonschema:Operation",
+              "properties" : {
+                "operation" : {
+                  "type" : "string"
+                },
+                "a" : {
+                  "type" : "number"
+                },
+                "b" : {
+                  "type" : "number"
+                }
+              }
+            }
+            """;
+var asyncToolRegistration = new McpServerFeatures.AsyncToolRegistration(
+    new Tool("calculator", "基础计算器", schema),
+    arguments -> {
+        // 工具实现
+        return Mono.just(new CallToolResult(result, false));
+    }
+);
+```
+  </Tab>
+</Tabs>
+
+### 资源注册
+
+<Tabs>
+  <Tab title="同步">
+```java
+// 同步资源注册
+var syncResourceRegistration = new McpServerFeatures.SyncResourceRegistration(
+    new Resource("custom://resource", "名称", "描述", "mime-type", null),
+    request -> {
+        // 资源读取实现
+        return new ReadResourceResult(contents);
+    }
+);
+```
+  </Tab>
+
+  <Tab title="异步">
+```java
+// 异步资源注册
+var asyncResourceRegistration = new McpServerFeatures.AsyncResourceRegistration(
+    new Resource("custom://resource", "名称", "描述", "mime-type", null),
+    request -> {
+        // 资源读取实现
+        return Mono.just(new ReadResourceResult(contents));
+    }
+);
+```
+  </Tab>
+</Tabs>
+
+### 提示注册
+
+<Tabs>
+  <Tab title="同步">
+```java
+// 同步提示注册
+var syncPromptRegistration = new McpServerFeatures.SyncPromptRegistration(
+    new Prompt("greeting", "描述", List.of(
+        new PromptArgument("name", "描述", true)
+    )),
+    request -> {
+        // 提示实现
+        return new GetPromptResult(description, messages);
+    }
+);
+```
+  </Tab>
+
+  <Tab title="异步">
+```java
+// 异步提示注册
+var asyncPromptRegistration = new McpServerFeatures.AsyncPromptRegistration(
+    new Prompt("greeting", "描述", List.of(
+        new PromptArgument("name", "描述", true)
+    )),
+    request -> {
+        // 提示实现
+        return Mono.just(new GetPromptResult(description, messages));
+    }
+);
+```
+  </Tab>
+</Tabs>
+
+## 错误处理
+
+该SDK通过McpError类提供全面的错误处理，涵盖协议兼容性、传输通信、JSON-RPC消息传递、工具执行、资源管理、提示处理、超时和连接问题。这种统一的错误处理方式确保了在同步和异步操作中实现一致且可靠的错误管理。

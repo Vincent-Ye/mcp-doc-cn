@@ -1,0 +1,281 @@
+---
+标题: 调试
+描述: 一份关于调试模型上下文协议（MCP）集成的综合指南
+---
+
+在开发MCP服务器或将其与应用程序集成时，进行有效的调试至关重要。本指南涵盖MCP生态系统中提供的调试工具和方法。
+
+<Info>  
+  本指南适用于macOS。其他平台的指南即将推出。  
+</Info>
+
+## 调试工具概览
+
+MCP在不同层级提供了多种调试工具：
+
+1. **MCP Inspector**
+   - 交互式调试界面  
+   - 直接进行服务器测试  
+   - 参阅[Inspector指南](/docs/tools/inspector)了解更多细节  
+
+2. **Claude桌面开发工具**
+   - 集成测试  
+   - 日志收集  
+   - 与Chrome DevTools集成  
+
+3. **服务器日志**
+   - 自定义日志实现  
+   - 错误跟踪  
+   - 性能监控  
+
+## Claude桌面端的调试
+
+### 检查服务器状态
+
+Claude.app界面提供了基本的服务器状态信息：
+
+1. 点击<img src="/images/claude-desktop-mcp-plug-icon.svg" style={{display: 'inline', margin: 0, height: '1.3em'}} />图标以查看：
+   - 已连接的服务器  
+   - 可用的提示与资源  
+
+2. 点击<img src="/images/claude-desktop-mcp-hammer-icon.svg" style={{display: 'inline', margin: 0, height: '1.3em'}} />图标以查看：
+   - 提供给模型的工具  
+
+### 查看日志
+
+从Claude Desktop中查看详细的MCP日志：
+
+```bash
+# 实时查看日志
+tail -n 20 -F ~/Library/Logs/Claude/mcp*.log
+```
+
+日志记录内容包括：
+- 服务器连接事件  
+- 配置问题  
+- 运行时错误  
+- 消息交换情况  
+
+### 使用Chrome DevTools
+
+通过Claude Desktop访问Chrome开发工具，以调查客户端错误：
+
+1. 创建一个`developer_settings.json`文件，设置`allowDevTools`为true：
+
+```bash
+echo '{"allowDevTools": true}' > ~/Library/Application\ Support/Claude/developer_settings.json
+```
+
+2. 打开开发工具：`Command-Option-Shift-i`
+
+注意：您将看到两个开发工具窗口：
+- 主内容窗口  
+- 应用程序标题栏窗口  
+
+使用Console面板检查客户端错误。  
+
+使用Network面板检查：
+- 消息负载  
+- 连接时间  
+
+## 常见问题
+
+### 工作目录
+
+在Claude Desktop中使用MCP服务器时：
+
+- 从`claude_desktop_config.json`启动的服务器的工作目录可能未定义（例如macOS上的`/`），因为Claude Desktop可以从任意位置启动。
+- 始终在您的配置和`.env`文件中使用绝对路径以确保可靠的运行。
+- 对于通过命令行直接测试服务器，工作目录将是运行命令的位置。
+
+例如，在`claude_desktop_config.json`中，请使用：
+```json
+{
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/username/data"]
+}
+```
+而不要使用相对路径，如`./data`。
+
+### 环境变量
+
+MCP服务器仅会自动继承部分环境变量，例如`USER`、`HOME`和`PATH`。
+
+要覆盖默认变量或提供自定义变量，可在`claude_desktop_config.json`中指定`env`键：
+
+```json
+{
+  "myserver": {
+    "command": "mcp-server-myapp",
+    "env": {
+      "MYAPP_API_KEY": "some_key"
+    }
+  }
+}
+```
+
+### 服务器初始化
+
+常见的初始化问题：
+
+1. **路径问题**  
+   - 服务器可执行文件路径不正确  
+   - 缺少必要文件  
+   - 权限问题  
+   - 尝试为`command`使用绝对路径  
+
+2. **配置错误**  
+   - JSON语法无效  
+   - 缺少必要字段  
+   - 类型不匹配  
+
+3. **环境问题**  
+   - 缺少环境变量  
+   - 变量值不正确  
+   - 权限限制  
+
+### 连接问题
+
+当服务器连接失败时：
+
+1. 检查Claude Desktop日志  
+2. 验证服务器进程是否正在运行  
+3. 使用[Inspector](/docs/tools/inspector)单独进行测试  
+4. 核实协议兼容性  
+
+## 实现日志记录
+
+### 服务器端日志记录
+
+当构建一个使用本地标准输入输出（stdio）[传输](/docs/concepts/transports)的服务器时，所有记录到标准错误（stderr）的消息都会被主机应用程序（例如 Claude Desktop）自动捕获。
+
+<警告>
+  本地 MCP 服务器不应记录消息到标准输出（stdout），因为这会干扰协议的正常运行。
+</警告>
+
+对于所有[传输](/docs/concepts/transports)，也可以通过发送日志消息通知为客户端提供日志记录功能：
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    server.request_context.session.send_log_message(
+      level="info",
+      data="Server started successfully",
+    )
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    server.sendLoggingMessage({
+      level: "info",
+      data: "Server started successfully",
+    });
+    ```
+  </Tab>
+</Tabs>
+
+需要记录的重要事件：
+- 初始化步骤
+- 资源访问
+- 工具执行
+- 错误情况
+- 性能指标
+
+### 客户端日志记录
+
+在客户端应用程序中：
+
+1. 启用调试日志记录
+2. 监控网络流量
+3. 跟踪消息交换
+4. 记录错误状态
+
+## 调试工作流
+
+### 开发周期
+
+1. 初步开发
+   - 使用 [Inspector](/docs/tools/inspector) 进行基本测试
+   - 实现核心功能
+   - 添加日志记录点
+
+2. 集成测试
+   - 在 Claude Desktop 中测试
+   - 监控日志
+   - 检查错误处理
+
+### 测试变更
+
+通过以下方式高效测试变更：
+
+- **配置变更**：重启 Claude Desktop；
+- **服务器代码变更**：使用 Command-R 重新加载；
+- **快速迭代**：在开发期间使用 [Inspector](/docs/tools/inspector)。
+
+## 最佳实践
+
+### 日志策略
+
+1. **结构化日志**
+   - 使用一致的格式
+   - 包含上下文
+   - 添加时间戳
+   - 跟踪请求 ID
+
+2. **错误处理**
+   - 记录堆栈跟踪
+   - 包含错误上下文
+   - 跟踪错误模式
+   - 监控恢复情况
+
+3. **性能追踪**
+   - 记录操作时间
+   - 监控资源使用
+   - 跟踪消息大小
+   - 测量延迟
+
+### 安全性考虑
+
+调试时需要注意：
+
+1. **敏感数据**
+   - 清理日志
+   - 保护凭证
+   - 隐藏个人信息
+
+2. **访问控制**
+   - 验证权限
+   - 检查认证
+   - 监控访问模式
+
+## 寻求帮助
+
+当遇到问题时：
+
+1. **初步步骤**
+   - 检查服务器日志
+   - 使用 [Inspector](/docs/tools/inspector) 进行测试
+   - 查看配置
+   - 验证环境
+
+2. **支持渠道**
+   - GitHub 问题（Issues）
+   - GitHub 讨论（Discussions）
+
+3. **提供信息**
+   - 日志片段
+   - 配置文件
+   - 复现步骤
+   - 环境详情
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card
+    title="MCP Inspector"
+    icon="magnifying-glass"
+    href="/docs/tools/inspector"
+  >
+    学习如何使用 MCP Inspector
+  </Card>
+</CardGroup>

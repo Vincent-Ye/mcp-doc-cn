@@ -1,0 +1,59 @@
+---
+标题: 路线图  
+描述: 我们关于 Model Context Protocol (MCP) 在2025年上半年的发展计划  
+
+---
+
+Model Context Protocol（模型上下文协议）正在快速演变。本页面概述了我们对于 **2025年上半年** 的关键优先事项和未来方向的现阶段思考，不过随着项目的推进，这些计划可能会发生显著变化。
+
+<注意>这里提出的想法并非承诺——我们可能采用与所描述内容不同的方法解决这些挑战，或者其中一些计划可能根本不会实现。此外，这也不是一个全面的清单；可能会纳入本文未提到的工作。</注意>  
+
+我们鼓励社区参与！每个部分都链接到相关讨论，您可以在那里了解更多信息并提出自己的想法。
+
+## 远程 MCP 支持  
+
+我们的首要任务是改进 [远程 MCP 连接](https://github.com/modelcontextprotocol/specification/discussions/112)，使客户端能够通过互联网安全地连接到 MCP 服务器。关键举措包括：  
+
+- [**身份认证与授权**](https://github.com/modelcontextprotocol/specification/discussions/64)：添加标准化的身份认证功能，特别是专注于支持 OAuth 2.0。  
+
+- [**服务发现**](https://github.com/modelcontextprotocol/specification/discussions/69)：定义客户端如何发现并连接到远程 MCP 服务器的方法。  
+
+- [**无状态操作**](https://github.com/modelcontextprotocol/specification/discussions/102)：探索 MCP 是否能够适用于无服务器环境，并需要更多的无状态功能。  
+
+## 参考实现  
+
+为了帮助开发人员使用 MCP，我们希望提供以下文档：  
+
+- **客户端示例**：详细全面的客户端实现，展示所有协议功能。  
+- **协议起草**：简化提议与集成新协议功能的流程。  
+
+## 分发与发现  
+
+展望未来，我们正在探索使 MCP 服务器更加可访问的方法。可能研究的领域包括：  
+
+- **包管理**：为 MCP 服务器定义标准化的打包格式。  
+- **安装工具**：简化跨 MCP 客户端的服务器安装流程。  
+- **沙盒隔离**：通过服务器隔离提高安全性。  
+- **服务器注册表**：一个用于发现可用 MCP 服务器的公共目录。  
+
+## 智能体支持  
+
+我们正在扩展 MCP 对于 [复杂智能体工作流](https://github.com/modelcontextprotocol/specification/discussions/111) 的支持，主要集中在以下领域：  
+
+- [**分层智能体系统**](https://github.com/modelcontextprotocol/specification/discussions/94)：通过命名空间和拓扑感知提升对智能体树结构的支持。  
+
+- [**交互式工作流**](https://github.com/modelcontextprotocol/specification/issues/97)：改进对用户权限以及智能体层级之间的信息请求的处理，同时寻求向用户而非模型发送输出的方式。  
+
+- [**流式结果**](https://github.com/modelcontextprotocol/specification/issues/117)：支持长时间运行的智能体操作提供实时更新。  
+
+## 更广泛的生态系统  
+
+我们还关注以下领域：  
+
+- **社区主导的标准开发**：构建一个协作的生态系统，让所有 AI 提供商能够平等参与并共同塑造 MCP 作为开放标准，使之满足多样化 AI 应用场景和需求。  
+- [**扩展支持格式**](https://github.com/modelcontextprotocol/specification/discussions/88)：不仅支持文本，还扩展到音频、视频以及其他格式。  
+- [**标准化过程**]：通过标准化机构推动正式标准化。  
+
+## 如何参与  
+
+我们欢迎社区参与共同塑造 MCP 的未来。访问我们的 [GitHub 讨论区](https://github.com/orgs/modelcontextprotocol/discussions)，加入对话并提出您的想法。  

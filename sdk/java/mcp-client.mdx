@@ -1,0 +1,319 @@
+---
+title: MCP客户端
+description: 学习如何使用模型上下文协议（MCP）客户端与MCP服务器交互
+---
+
+# 模型上下文协议客户端
+
+MCP客户端是模型上下文协议（MCP）架构中的关键组件，负责与MCP服务器建立和管理连接。它实现了协议的客户端端处理功能，包括：
+
+- 协议版本协商以确保与服务器兼容
+- 功能协商以确定可用特性
+- 消息传输和JSON-RPC通信
+- 工具的发现与执行
+- 资源的访问与管理
+- 提示系统的交互
+- 可选功能：根管理和采样支持
+
+客户端提供同步和异步API，以适应不同应用场景的灵活性。
+
+<Tabs>
+  <Tab title="同步API">
+```java
+// 使用自定义配置创建同步客户端
+McpSyncClient client = McpClient.sync(transport)
+    .requestTimeout(Duration.ofSeconds(10)) // 请求超时设置
+    .capabilities(ClientCapabilities.builder()
+        .roots(true)      // 启用根功能
+        .sampling()       // 启用采样功能
+        .build())
+    .sampling(request -> new CreateMessageResult(response))
+    .build();
+
+// 初始化连接
+client.initialize();
+
+// 列出可用工具
+ListToolsResult tools = client.listTools();
+
+// 调用工具
+CallToolResult result = client.callTool(
+    new CallToolRequest("calculator", 
+        Map.of("operation", "add", "a", 2, "b", 3))
+);
+
+// 列出并读取资源
+ListResourcesResult resources = client.listResources();
+ReadResourceResult resource = client.readResource(
+    new ReadResourceRequest("resource://uri")
+);
+
+// 列出并使用提示
+ListPromptsResult prompts = client.listPrompts();
+GetPromptResult prompt = client.getPrompt(
+    new GetPromptRequest("greeting", Map.of("name", "Spring"))
+);
+
+// 添加/移除根
+client.addRoot(new Root("file:///path", "description"));
+client.removeRoot("file:///path");
+
+// 优雅地关闭客户端
+client.closeGracefully();
+```
+  </Tab>
+
+  <Tab title="异步API">
+```java
+// 使用自定义配置创建异步客户端
+McpAsyncClient client = McpClient.async(transport)
+    .requestTimeout(Duration.ofSeconds(10)) // 请求超时设置
+    .capabilities(ClientCapabilities.builder()
+        .roots(true)      // 启用根功能
+        .sampling()       // 启用采样功能
+        .build())
+    .sampling(request -> Mono.just(new CreateMessageResult(response)))
+    .toolsChangeConsumer(tools -> Mono.fromRunnable(() -> {
+        logger.info("工具更新: {}", tools);
+    }))
+    .resourcesChangeConsumer(resources -> Mono.fromRunnable(() -> {
+        logger.info("资源更新: {}", resources);
+    }))
+    .promptsChangeConsumer(prompts -> Mono.fromRunnable(() -> {
+        logger.info("提示更新: {}", prompts);
+    }))
+    .build();
+
+// 初始化连接并使用功能
+client.initialize()
+    .flatMap(initResult -> client.listTools())
+    .flatMap(tools -> {
+        return client.callTool(new CallToolRequest(
+            "calculator", 
+            Map.of("operation", "add", "a", 2, "b", 3)
+        ));
+    })
+    .flatMap(result -> {
+        return client.listResources()
+            .flatMap(resources -> 
+                client.readResource(new ReadResourceRequest("resource://uri"))
+            );
+    })
+    .flatMap(resource -> {
+        return client.listPrompts()
+            .flatMap(prompts ->
+                client.getPrompt(new GetPromptRequest(
+                    "greeting", 
+                    Map.of("name", "Spring")
+                ))
+            );
+    })
+    .flatMap(prompt -> {
+        return client.addRoot(new Root("file:///path", "description"))
+            .then(client.removeRoot("file:///path"));            
+    })
+    .doFinally(signalType -> {
+        client.closeGracefully().subscribe();
+    })
+    .subscribe();
+```
+  </Tab>
+</Tabs>
+
+## 客户端传输方式
+
+运输层负责MCP客户端和服务器之间的通信，根据不同的使用场景提供多种实现方案。客户端传输层管理消息序列化、连接建立以及协议特定的通信模式。
+
+<Tabs>
+    <Tab title="STDIO">
+        创建用于进程内通信的传输
+        ```java
+        ServerParameters params = ServerParameters.builder("npx")
+            .args("-y", "@modelcontextprotocol/server-everything", "dir")
+            .build();
+        McpTransport transport = new StdioClientTransport(params);
+        ```
+    </Tab>
+    <Tab title="SSE (HttpClient)">
+        创建一个框架无关的（纯Java API）SSE客户端传输。包含在核心的mcp模块中。
+        ```java
+        McpTransport transport = new HttpClientSseClientTransport("http://your-mcp-server");
+        ```
+    </Tab>
+    <Tab title="SSE (WebFlux)">
+        创建基于WebFlux的SSE客户端传输。需要引入mcp-webflux-sse-transport依赖。
+        ```java
+        WebClient.Builder webClientBuilder = WebClient.builder()
+            .baseUrl("http://your-mcp-server");
+        McpTransport transport = new WebFluxSseClientTransport(webClientBuilder);
+        ```
+    </Tab>
+</Tabs>
+
+## 客户端功能
+
+可以根据需要为客户端配置各种功能：
+
+```java
+var capabilities = ClientCapabilities.builder()
+    .roots(true)      // 启用文件系统根目录支持，包含列表变更通知
+    .sampling()       // 启用LLM采样支持
+    .build();
+```
+
+### 根目录支持
+
+根目录定义了服务器在文件系统中可以操作的边界：
+
+```java
+// 动态添加一个根目录
+client.addRoot(new Root("file:///path", "description"));
+
+// 移除一个根目录
+client.removeRoot("file:///path");
+
+// 通知服务器根目录的变更
+client.rootsListChangedNotification();
+```
+
+根目录支持功能允许服务器：
+- 请求可以访问的文件系统根目录列表
+- 接收根目录列表变更通知
+- 理解其有权限操作的文件和目录范围
+
+### 采样支持
+
+采样允许服务器通过客户端请求LLM交互（“补全”或“生成”）：
+
+```java
+// 配置采样处理器
+Function<CreateMessageRequest, CreateMessageResult> samplingHandler = request -> {
+    // 实现与LLM接口的采样逻辑
+    return new CreateMessageResult(response);
+};
+
+// 创建支持采样功能的客户端
+var client = McpClient.sync(transport)
+    .capabilities(ClientCapabilities.builder()
+        .sampling()
+        .build())
+    .sampling(samplingHandler)
+    .build();
+```
+
+该功能允许：
+- 服务器利用AI能力而无需API密钥
+- 客户端控制模型的访问和权限
+- 支持文本和图像的交互
+- 可选地在提示中包含MCP服务器上下文
+
+## 使用MCP客户端
+
+### 工具执行
+
+工具是服务器端的功能，客户端可以发现并执行这些功能。MCP客户端提供方法列出可用工具并通过特定参数调用它们。每个工具都有一个唯一的名称并接受一个参数映射。
+
+<Tabs>
+  <Tab title="同步API">
+```java
+// 列出可用工具及其名称
+var tools = client.listTools();
+tools.forEach(tool -> System.out.println(tool.getName()));
+
+// 使用参数执行工具
+var result = client.callTool("calculator", Map.of(
+    "operation", "add",
+    "a", 1,
+    "b", 2
+));
+```
+  </Tab>
+
+  <Tab title="异步API">
+```java
+// 异步列出可用工具
+client.listTools()
+    .doOnNext(tools -> tools.forEach(tool -> 
+        System.out.println(tool.getName())))
+    .subscribe();
+
+// 异步调用工具
+client.callTool("calculator", Map.of(
+        "operation", "add",
+        "a", 1,
+        "b", 2
+    ))
+    .subscribe();
+```
+  </Tab>
+</Tabs>
+
+### 资源访问
+
+资源代表了服务器端的数据源，客户端可以通过 URI 模板来访问这些资源。MCP 客户端提供了方法，用于通过标准化接口发现可用资源并检索其内容。
+
+<Tabs>
+  <Tab title="同步 API">
+```java
+// 列出可用资源及其名称
+var resources = client.listResources();
+resources.forEach(resource -> System.out.println(resource.getName()));
+
+// 使用 URI 模板检索资源内容
+var content = client.getResource("file", Map.of(
+    "path", "/path/to/file.txt"
+));
+```
+  </Tab>
+
+  <Tab title="异步 API">
+```java
+// 异步列出可用资源
+client.listResources()
+    .doOnNext(resources -> resources.forEach(resource -> 
+        System.out.println(resource.getName())))
+    .subscribe();
+
+// 异步检索资源内容
+client.getResource("file", Map.of(
+        "path", "/path/to/file.txt"
+    ))
+    .subscribe();
+```
+  </Tab>
+</Tabs>
+
+### 提示系统
+
+提示系统支持与服务器端的提示模板进行交互。这些模板可以被发现并通过自定义参数执行，从而根据预定义的模式动态生成文本。
+
+<Tabs>
+  <Tab title="同步 API">
+```java
+// 列出可用的提示模板
+var prompts = client.listPrompts();
+prompts.forEach(prompt -> System.out.println(prompt.getName()));
+
+// 使用参数执行提示模板
+var response = client.executePrompt("echo", Map.of(
+    "text", "Hello, World!"
+));
+```
+  </Tab>
+
+  <Tab title="异步 API">
+```java
+// 异步列出可用的提示模板
+client.listPrompts()
+    .doOnNext(prompts -> prompts.forEach(prompt -> 
+        System.out.println(prompt.getName())))
+    .subscribe();
+
+// 异步执行提示模板
+client.executePrompt("echo", Map.of(
+        "text", "Hello, World!"
+    ))
+    .subscribe();
+```
+  </Tab>
+</Tabs>

@@ -1,0 +1,395 @@
+---
+title: "传输方式"
+description: "了解 MCP 的通信机制"
+---
+
+在模型上下文协议（Model Context Protocol，MCP）中，传输方式为客户端与服务器间的通信提供了基础。传输方式负责处理如何发送和接收消息的底层机制。
+
+## 消息格式
+
+MCP 使用 [JSON-RPC](https://www.jsonrpc.org/) 2.0 作为其传输协议的格式。传输层负责将 MCP 协议消息转换为 JSON-RPC 格式进行传输，并将接收到的 JSON-RPC 消息转换回 MCP 协议消息。
+
+JSON-RPC 使用以下三种类型的消息：
+
+### 请求（Requests）
+```typescript
+{
+  jsonrpc: "2.0",
+  id: number | string,
+  method: string,
+  params?: object
+}
+```
+
+### 响应（Responses）
+```typescript
+{
+  jsonrpc: "2.0",
+  id: number | string,
+  result?: object,
+  error?: {
+    code: number,
+    message: string,
+    data?: unknown
+  }
+}
+```
+
+### 通知（Notifications）
+```typescript
+{
+  jsonrpc: "2.0",
+  method: string,
+  params?: object
+}
+```
+
+## 内置传输方式
+
+MCP 包括两种标准的传输实现：
+
+### 标准输入/输出（stdio）
+
+标准输入/输出（stdio）传输使得通过标准输入流和输出流进行通信成为可能。这种传输方式特别适用于本地集成和命令行工具。
+
+使用 stdio 的场景：
+- 构建命令行工具
+- 实现本地集成
+- 需要简单的进程通信
+- 与 shell 脚本配合
+
+<Tabs>
+  <Tab title="TypeScript（服务器端）">
+    ```typescript
+    const server = new Server({
+      name: "example-server",
+      version: "1.0.0"
+    }, {
+      capabilities: {}
+    });
+
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    ```
+  </Tab>
+  <Tab title="TypeScript（客户端）">
+    ```typescript
+    const client = new Client({
+      name: "example-client",
+      version: "1.0.0"
+    }, {
+      capabilities: {}
+    });
+
+    const transport = new StdioClientTransport({
+      command: "./server",
+      args: ["--option", "value"]
+    });
+    await client.connect(transport);
+    ```
+  </Tab>
+  <Tab title="Python（服务器端）">
+    ```python
+    app = Server("example-server")
+
+    async with stdio_server() as streams:
+        await app.run(
+            streams[0],
+            streams[1],
+            app.create_initialization_options()
+        )
+    ```
+  </Tab>
+  <Tab title="Python（客户端）">
+    ```python
+    params = StdioServerParameters(
+        command="./server",
+        args=["--option", "value"]
+    )
+
+    async with stdio_client(params) as streams:
+        async with ClientSession(streams[0], streams[1]) as session:
+            await session.initialize()
+    ```
+  </Tab>
+</Tabs>
+
+### 服务器推送事件（SSE）
+
+SSE 传输支持以服务器推送事件的形式进行流式通信，同时使用 HTTP POST 请求处理客户端到服务器的通信。
+
+使用 SSE 的场景：
+- 仅需服务器到客户端的流式通信
+- 在受限网络环境中工作
+- 简单的更新场景
+
+<Tabs>
+  <Tab title="TypeScript（服务器端）">
+    ```typescript
+    import express from "express";
+    
+    const app = express();
+    
+    const server = new Server({
+      name: "example-server",
+      version: "1.0.0"
+    }, {
+      capabilities: {}
+    });
+    
+    let transport: SSEServerTransport | null = null;
+
+    app.get("/sse", (req, res) => {
+      transport = new SSEServerTransport("/messages", res);
+      server.connect(transport);
+    });
+
+    app.post("/messages", (req, res) => {
+      if (transport) {
+        transport.handlePostMessage(req, res);
+      }
+    });
+
+    app.listen(3000);
+    ```
+  </Tab>
+  <Tab title="TypeScript（客户端）">
+    ```typescript
+    const client = new Client({
+      name: "example-client",
+      version: "1.0.0"
+    }, {
+      capabilities: {}
+    });
+
+```plaintext
+const transport = new SSEClientTransport(
+  new URL("http://localhost:3000/sse")
+);
+await client.connect(transport);
+```
+</Tab>
+<Tab title="Python (服务器)">
+```python
+from mcp.server.sse import SseServerTransport
+from starlette.applications import Starlette
+from starlette.routing import Route
+
+app = Server("示例服务器")
+sse = SseServerTransport("/messages")
+
+async def handle_sse(scope, receive, send):
+    async with sse.connect_sse(scope, receive, send) as streams:
+        await app.run(streams[0], streams[1], app.create_initialization_options())
+
+async def handle_messages(scope, receive, send):
+    await sse.handle_post_message(scope, receive, send)
+
+starlette_app = Starlette(
+    routes=[
+        Route("/sse", endpoint=handle_sse),
+        Route("/messages", endpoint=handle_messages, methods=["POST"]),
+    ]
+)
+```
+</Tab>
+<Tab title="Python (客户端)">
+```python
+async with sse_client("http://localhost:8000/sse") as streams:
+    async with ClientSession(streams[0], streams[1]) as session:
+        await session.initialize()
+```
+</Tab>
+</Tabs>
+
+## 自定义传输
+
+MCP 使得实现针对特定需求的自定义传输变得简单。任何传输实现只需符合 Transport 接口即可：
+
+您可以实现的自定义传输包括：
+- 自定义网络协议
+- 专用的通信信道
+- 与现有系统集成
+- 性能优化
+
+<Tabs>
+<Tab title="TypeScript">
+```typescript
+interface Transport {
+  // 开始处理消息
+  start(): Promise<void>;
+
+  // 发送一个 JSON-RPC 消息
+  send(message: JSONRPCMessage): Promise<void>;
+
+  // 关闭连接
+  close(): Promise<void>;
+
+  // 回调函数
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+}
+```
+</Tab>
+<Tab title="Python">
+请注意，虽然 MCP 服务器通常使用 asyncio 实现，但我们建议使用 `anyio` 实现底层接口（如传输接口），以获得更广泛的兼容性。
+```python
+@contextmanager
+async def create_transport(
+    read_stream: MemoryObjectReceiveStream[JSONRPCMessage | Exception],
+    write_stream: MemoryObjectSendStream[JSONRPCMessage]
+):
+    """
+    MCP 的传输接口。
+
+    参数:
+        read_stream: 用于接收传入消息的流
+        write_stream: 用于发送传出消息的流
+    """
+    async with anyio.create_task_group() as tg:
+        try:
+            # 开始处理消息
+            tg.start_soon(lambda: process_messages(read_stream))
+
+            # 发送消息
+            async with write_stream:
+                yield write_stream
+
+        except Exception as exc:
+            # 错误处理
+            raise exc
+        finally:
+            # 清理资源
+            tg.cancel_scope.cancel()
+            await write_stream.aclose()
+            await read_stream.aclose()
+```
+</Tab>
+</Tabs>
+
+## 错误处理
+
+传输实现应处理各种错误场景：
+
+1. 连接错误
+2. 消息解析错误
+3. 协议错误
+4. 网络超时
+5. 资源清理
+
+错误处理示例：
+
+<Tabs>
+<Tab title="TypeScript">
+```typescript
+class ExampleTransport implements Transport {
+  async start() {
+    try {
+      // 连接逻辑
+    } catch (error) {
+      this.onerror?.(new Error(`连接失败: ${error}`));
+      throw error;
+    }
+  }
+```
+
+```javascript
+async send(message: JSONRPCMessage) {
+  try {
+    // 发送逻辑
+  } catch (error) {
+    this.onerror?.(new Error(`发送消息失败: ${error}`));
+    throw error;
+  }
+}
+```
+
+```python
+@contextmanager
+async def example_transport(scope: Scope, receive: Receive, send: Send):
+    try:
+        # 创建双向通信的流
+        read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
+        write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
+
+        async def message_handler():
+            try:
+                async with read_stream_writer:
+                    # 消息处理逻辑
+                    pass
+            except Exception as exc:
+                logger.error(f"消息处理失败: {exc}")
+                raise exc
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(message_handler)
+            try:
+                # 提供通信流
+                yield read_stream, write_stream
+            except Exception as exc:
+                logger.error(f"传输错误: {exc}")
+                raise exc
+            finally:
+                tg.cancel_scope.cancel()
+                await write_stream.aclose()
+                await read_stream.aclose()
+    except Exception as exc:
+        logger.error(f"初始化传输失败: {exc}")
+        raise exc
+```
+
+## 最佳实践
+
+在实现或使用 MCP 传输时：
+
+1. 正确处理连接生命周期
+2. 实现适当的错误处理
+3. 在连接关闭时清理资源
+4. 使用适当的超时时间
+5. 在发送消息之前验证消息
+6. 记录传输事件用于调试
+7. 根据需要实现重连逻辑
+8. 在消息队列中处理背压
+9. 监控连接状况
+10. 实现合适的安全措施
+
+## 安全性考量
+
+在实现传输时：
+
+### 身份验证与授权
+- 实现合适的身份验证机制
+- 验证客户端凭据
+- 使用安全的令牌处理
+- 实现授权检查
+
+### 数据安全
+- 使用 TLS 进行网络传输
+- 加密敏感数据
+- 验证消息完整性
+- 实现消息大小限制
+- 清理输入数据
+
+### 网络安全
+- 实现限流
+- 使用适当的超时时间
+- 处理拒绝服务场景
+- 监控异常模式
+- 实施适当的防火墙规则
+
+## 传输调试
+
+调试传输问题的技巧：
+
+1. 启用调试日志
+2. 监控消息流
+3. 检查连接状态
+4. 验证消息格式
+5. 测试错误场景
+6. 使用网络分析工具
+7. 实施健康检查
+8. 监控资源使用
+9. 测试边缘情况
+10. 使用适当的错误追踪
+
